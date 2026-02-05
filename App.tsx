@@ -1,14 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import AIChat from './components/AIChat';
-import AdminPanel from './components/AdminPanel';
-import { PROJECTS, SKILLS, USER_INFO } from './constants';
-import { PortfolioData, Project, Skill, UserInfo } from './types';
-import { supabase } from './services/supabase';
+import AIChat from './components/AIChat.tsx';
+import AdminPanel from './components/AdminPanel.tsx';
+import { PROJECTS, SKILLS, USER_INFO } from './constants.tsx';
+import { PortfolioData, Project, Skill, UserInfo } from './types.ts';
+import { supabase } from './services/supabase.ts';
 
 const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
-  const [dbError, setDbError] = useState<string | null>(null);
   const [criticalError, setCriticalError] = useState<string | null>(null);
   const [data, setData] = useState<PortfolioData>({
     projects: PROJECTS,
@@ -19,95 +18,83 @@ const App: React.FC = () => {
   const PROFILE_ID = '00000000-0000-0000-0000-000000000001';
 
   useEffect(() => {
-    let ignore = false;
+    let isMounted = true;
 
     const fetchData = async () => {
       try {
-        if (!ignore) setLoading(true);
-        setDbError(null);
+        if (isMounted) setLoading(true);
 
-        // Supabase ulanishini tekshirish
+        // Supabase mavjudligini tekshirish
         if (!supabase) {
-          throw new Error("Supabase mijozini yuklab bo'lmadi.");
+          console.warn("Supabase ulanishi mavjud emas.");
+          if (isMounted) setLoading(false);
+          return;
         }
 
-        // Ma'lumotlarni parallel ravishda yuklash (tezroq ishlashi uchun)
         const [profileRes, projectsRes, skillsRes] = await Promise.all([
           supabase.from('profiles').select('*').eq('id', PROFILE_ID).maybeSingle(),
           supabase.from('projects').select('*').order('id', { ascending: true }),
           supabase.from('skills').select('*').order('id', { ascending: true })
         ]);
 
-        if (ignore) return;
+        if (!isMounted) return;
 
-        if (profileRes.error || projectsRes.error || skillsRes.error) {
-          console.warn("Supabase jadvallari topilmadi, standart ma'lumotlar yuklanmoqda.");
-          setDbError("Supabase sozlanmagan.");
+        // Agar ma'lumotlar bo'lsa, ularni map qilish
+        const profileData = profileRes?.data;
+        const projectsData = projectsRes?.data;
+        const skillsData = skillsRes?.data;
+
+        if (profileData || (projectsData && projectsData.length > 0) || (skillsData && skillsData.length > 0)) {
+          setData({
+            userInfo: profileData ? {
+              name: profileData.name,
+              title: profileData.title,
+              bio: profileData.bio,
+              location: profileData.location,
+              email: profileData.email,
+              image: profileData.image_url || USER_INFO.image,
+              socials: {
+                github: profileData.github_url || '',
+                linkedin: profileData.linkedin_url || '',
+                telegram: profileData.telegram_url || ''
+              }
+            } : USER_INFO,
+            projects: projectsData && projectsData.length > 0 
+              ? projectsData.map((p: any) => ({
+                  id: p.id,
+                  title: p.title,
+                  description: p.description,
+                  image: p.image_url,
+                  tags: p.tags || [],
+                  link: p.link
+                }))
+              : PROJECTS,
+            skills: skillsData && skillsData.length > 0
+              ? skillsData.map((s: any) => ({
+                  name: s.name,
+                  level: s.level,
+                  icon: s.icon
+                }))
+              : SKILLS
+          });
         }
-
-        const profileData = profileRes.data;
-        const projectsData = projectsRes.data;
-        const skillsData = skillsRes.data;
-
-        const mappedUserInfo: UserInfo = profileData ? {
-          name: profileData.name,
-          title: profileData.title,
-          bio: profileData.bio,
-          location: profileData.location,
-          email: profileData.email,
-          image: profileData.image_url || USER_INFO.image,
-          socials: {
-            github: profileData.github_url || '',
-            linkedin: profileData.linkedin_url || '',
-            telegram: profileData.telegram_url || ''
-          }
-        } : USER_INFO;
-
-        const mappedProjects: Project[] = projectsData && projectsData.length > 0 
-          ? projectsData.map(p => ({
-              id: p.id,
-              title: p.title,
-              description: p.description,
-              image: p.image_url,
-              tags: p.tags || [],
-              link: p.link
-            }))
-          : PROJECTS;
-
-        const mappedSkills: Skill[] = skillsData && skillsData.length > 0
-          ? skillsData.map(s => ({
-              name: s.name,
-              level: s.level,
-              icon: s.icon
-            }))
-          : SKILLS;
-
-        setData({
-          userInfo: mappedUserInfo,
-          projects: mappedProjects,
-          skills: mappedSkills
-        });
       } catch (error: any) {
-        // "AbortError" yoki "signal is aborted" xatolarini e'tiborsiz qoldiramiz
-        if (error.name === 'AbortError' || error.message?.includes('aborted')) {
-          return;
+        if (error.name !== 'AbortError') {
+          console.error("Ma'lumotlarni yuklashda xato:", error);
         }
-        console.error("Kutilmagan xato:", error);
-        if (!ignore) setCriticalError(error.message || "Tizimni yuklashda xatolik yuz berdi.");
       } finally {
-        if (!ignore) setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
 
     fetchData();
-
-    return () => {
-      ignore = true;
-    };
+    return () => { isMounted = false; };
   }, []);
 
   const handleSaveData = async (newData: PortfolioData) => {
     try {
+      if (!supabase) throw new Error("Supabase ulanmagan");
+      
       const profileToSave = {
         id: PROFILE_ID,
         name: newData.userInfo.name,
@@ -121,141 +108,80 @@ const App: React.FC = () => {
         telegram_url: newData.userInfo.socials.telegram,
       };
 
-      const { error: profileError } = await supabase.from('profiles').upsert([profileToSave]);
-      if (profileError) throw profileError;
-
-      await supabase.from('skills').delete().neq('id', -1);
-      if (newData.skills.length > 0) {
-        await supabase.from('skills').insert(newData.skills.map(s => ({ name: s.name, level: s.level, icon: s.icon })));
-      }
-
-      await supabase.from('projects').delete().neq('id', -1);
-      if (newData.projects.length > 0) {
-        await supabase.from('projects').insert(newData.projects.map(p => ({ title: p.title, description: p.description, image_url: p.image, tags: p.tags, link: p.link })));
-      }
-
+      await supabase.from('profiles').upsert([profileToSave]);
       setData(newData);
       alert("Ma'lumotlar saqlandi!");
     } catch (error: any) {
-      alert("Saqlashda xato: " + error.message);
+      alert("Xatolik: " + error.message);
     }
   };
 
-  if (criticalError) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
-        <div className="bg-red-500/10 border border-red-500/20 p-8 rounded-3xl max-w-md">
-          <h1 className="text-2xl font-bold text-red-500 mb-4">Xatolik Yuz Berdi</h1>
-          <p className="text-slate-400 mb-6">{criticalError}</p>
-          <button onClick={() => window.location.reload()} className="bg-blue-600 px-6 py-2 rounded-xl font-bold">Qayta yuklash</button>
-        </div>
-      </div>
-    );
-  }
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center gap-4">
-        <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
-        <p className="text-slate-400 animate-pulse font-medium">Ma'lumotlar yuklanmoqda...</p>
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center">
+        <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4"></div>
+        <p className="text-slate-400 animate-pulse text-sm">Portfolio yuklanmoqda...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen animate-in fade-in duration-700">
-      {dbError && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] bg-blue-500/10 border border-blue-500/20 text-blue-400 px-4 py-2 rounded-lg text-xs backdrop-blur-md flex items-center gap-2">
-          <span>ℹ️</span> 
-          Supabase jadvallari hali yaratilmagan. Standart ma'lumotlar ko'rsatilmoqda.
-        </div>
-      )}
-      
+    <div className="min-h-screen bg-slate-950 text-slate-200 selection:bg-blue-500/30">
       <AdminPanel data={data} onSave={handleSaveData} />
       
-      <nav className="fixed top-0 w-full z-40 glass border-b border-white/5">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      {/* Navbar */}
+      <nav className="fixed top-0 w-full z-40 glass border-b border-white/5 h-16">
+        <div className="max-w-7xl mx-auto px-6 h-full flex items-center justify-between">
           <div className="text-xl font-bold text-gradient tracking-tighter">PORTFOLIO.</div>
           <div className="hidden md:flex gap-8 text-sm font-medium">
             <a href="#home" className="hover:text-blue-400 transition-colors">Asosiy</a>
             <a href="#about" className="hover:text-blue-400 transition-colors">Men haqimda</a>
             <a href="#skills" className="hover:text-blue-400 transition-colors">Ko'nikmalar</a>
             <a href="#projects" className="hover:text-blue-400 transition-colors">Loyihalar</a>
-            <a href="#contact" className="hover:text-blue-400 transition-colors">Aloqa</a>
           </div>
         </div>
       </nav>
 
+      {/* Hero */}
       <section id="home" className="pt-32 pb-20 px-6">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center gap-12">
           <div className="flex-1 space-y-6">
-            <h2 className="text-blue-500 font-medium tracking-wider uppercase text-sm">XUSH KELIBSIZ</h2>
-            <h1 className="text-5xl md:text-7xl font-bold leading-tight">{data.userInfo.name}</h1>
-            <p className="text-xl md:text-2xl text-slate-400 max-w-2xl leading-relaxed">
-              {data.userInfo.title}. Men <span className="text-white font-medium">innovatsion raqamli yechimlar</span> yarataman.
+            <h2 className="text-blue-500 font-bold tracking-widest uppercase text-xs">WEB DEVELOPER</h2>
+            <h1 className="text-5xl md:text-7xl font-bold leading-[1.1]">{data.userInfo.name}</h1>
+            <p className="text-lg md:text-xl text-slate-400 max-w-2xl leading-relaxed">
+              {data.userInfo.title}. Men <span className="text-white">zamonaviy va interaktiv</span> veb-ilovalarni yaratishga ixtisoslashganman.
             </p>
-            <div className="flex flex-wrap gap-4 pt-4">
-              <a href="#projects" className="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-full font-semibold transition-all text-white shadow-lg shadow-blue-600/20">Loyihalarim</a>
-              <a href="#contact" className="border border-white/20 hover:bg-white/5 px-8 py-3 rounded-full font-semibold transition-all">Bog'lanish</a>
+            <div className="flex gap-4 pt-4">
+              <a href="#projects" className="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-full font-bold transition-all text-white shadow-lg shadow-blue-500/20">Loyihalar</a>
+              <a href="#contact" className="glass px-8 py-3 rounded-full font-bold hover:bg-white/5 transition-all">Bog'lanish</a>
             </div>
           </div>
-          <div className="relative w-64 h-64 md:w-80 md:h-80 lg:w-96 lg:h-96">
-            <div className="absolute inset-0 bg-blue-600 rounded-full blur-[100px] opacity-20 animate-pulse"></div>
+          <div className="relative group">
+            <div className="absolute inset-0 bg-blue-600 rounded-3xl blur-[80px] opacity-20 group-hover:opacity-30 transition-opacity"></div>
             <img 
               src={data.userInfo.image} 
               alt="Profile" 
-              className="relative z-10 w-full h-full object-cover rounded-3xl border-2 border-white/10 shadow-2xl bg-slate-900 transition-transform hover:scale-[1.02]"
+              className="relative z-10 w-64 h-64 md:w-80 md:h-80 object-cover rounded-3xl border border-white/10 shadow-2xl"
+              onError={(e) => { (e.target as any).src = 'https://picsum.photos/400/400'; }}
             />
           </div>
         </div>
       </section>
 
-      <section id="about" className="py-20 bg-slate-900/30">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="flex flex-col md:flex-row gap-16 items-start">
-            <div className="md:w-1/3">
-              <h2 className="text-3xl font-bold mb-4 flex items-center gap-4">
-                Men haqimda <span className="h-px bg-blue-500 flex-1"></span>
-              </h2>
-            </div>
-            <div className="md:w-2/3 space-y-6 text-slate-300 leading-relaxed text-lg">
-              <p>{data.userInfo.bio}</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 pt-6 border-t border-white/5">
-                <div className="flex flex-col gap-1">
-                  <span className="text-blue-500 text-xs font-bold uppercase tracking-widest">Yashash manzili</span>
-                  <span className="text-white font-medium">{data.userInfo.location}</span>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-blue-500 text-xs font-bold uppercase tracking-widest">Elektron pochta</span>
-                  <span className="text-white font-medium">{data.userInfo.email}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="skills" className="py-20 px-6">
+      {/* Skills */}
+      <section id="skills" className="py-20 px-6 bg-slate-900/20">
         <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold mb-4">Texnik Mahorat</h2>
-            <p className="text-slate-400">Men foydalanadigan asosiy texnologiyalar</p>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <h2 className="text-3xl font-bold mb-12 text-center">Texnik Mahorat</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {data.skills.map((skill, i) => (
-              <div key={i} className="glass p-6 rounded-2xl hover:border-blue-500/50 transition-all group">
+              <div key={i} className="glass p-6 rounded-2xl group hover:border-blue-500/50 transition-all">
                 <div className="flex justify-between items-center mb-4">
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl group-hover:scale-125 transition-transform">{skill.icon}</span>
-                    <h3 className="font-semibold text-lg">{skill.name}</h3>
-                  </div>
-                  <span className="text-blue-400 font-bold">{skill.level}%</span>
+                  <span className="text-2xl">{skill.icon}</span>
+                  <span className="text-blue-400 font-bold text-sm">{skill.level}%</span>
                 </div>
-                <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-1000 ease-out"
-                    style={{ width: `${skill.level}%` }}
-                  ></div>
+                <h3 className="font-bold mb-3">{skill.name}</h3>
+                <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500 rounded-full transition-all duration-1000" style={{ width: `${skill.level}%` }}></div>
                 </div>
               </div>
             ))}
@@ -263,30 +189,25 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      <section id="projects" className="py-20 bg-slate-900/30 px-6">
+      {/* Projects */}
+      <section id="projects" className="py-20 px-6">
         <div className="max-w-7xl mx-auto">
-          <h2 className="text-3xl font-bold mb-12">Tanlangan Ishlarim</h2>
+          <h2 className="text-3xl font-bold mb-12">Tanlangan Loyihalar</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {data.projects.map((project) => (
-              <div key={project.id || project.title} className="group glass rounded-3xl overflow-hidden hover:-translate-y-2 transition-all duration-300">
-                <div className="aspect-video overflow-hidden bg-slate-900 relative">
-                  <img src={project.image} alt={project.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500 opacity-80 group-hover:opacity-100" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950 to-transparent opacity-60"></div>
+            {data.projects.map((project, i) => (
+              <div key={i} className="glass rounded-3xl overflow-hidden group">
+                <div className="aspect-video bg-slate-900 overflow-hidden">
+                  <img src={project.image} alt={project.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                 </div>
                 <div className="p-6">
-                  <div className="flex gap-2 mb-4 flex-wrap">
+                  <div className="flex gap-2 mb-4">
                     {project.tags.map(tag => (
-                      <span key={tag} className="text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-lg border border-blue-500/20">{tag}</span>
+                      <span key={tag} className="text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-400 px-2 py-1 rounded-md">{tag}</span>
                     ))}
                   </div>
-                  <h3 className="text-xl font-bold mb-2 group-hover:text-blue-400 transition-colors">{project.title}</h3>
-                  <p className="text-slate-400 text-sm mb-6 line-clamp-2 leading-relaxed">{project.description}</p>
-                  <a href={project.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm font-bold text-blue-500 hover:gap-3 transition-all">
-                    Loyiha bilan tanishish
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                    </svg>
-                  </a>
+                  <h3 className="text-xl font-bold mb-2">{project.title}</h3>
+                  <p className="text-slate-400 text-sm mb-6 line-clamp-2">{project.description}</p>
+                  <a href={project.link} target="_blank" rel="noopener noreferrer" className="text-blue-500 font-bold text-sm hover:underline">Loyihani ko'rish →</a>
                 </div>
               </div>
             ))}
@@ -294,33 +215,9 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      <section id="contact" className="py-20 px-6">
-        <div className="max-w-3xl mx-auto text-center">
-          <h2 className="text-4xl font-bold mb-4">Aloqaga chiqasizmi?</h2>
-          <p className="text-slate-400 mb-10">Savollaringiz bo'lsa yoki hamkorlik qilmoqchi bo'lsangiz, yozing!</p>
-          <div className="glass p-8 rounded-3xl border-blue-500/10">
-            <div className="space-y-4 text-left">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <input type="text" placeholder="Ismingiz" className="w-full bg-slate-950/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-blue-500 outline-none transition-all" />
-                <input type="email" placeholder="Emailingiz" className="w-full bg-slate-950/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-blue-500 outline-none transition-all" />
-              </div>
-              <textarea placeholder="Xabaringiz..." rows={4} className="w-full bg-slate-950/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-blue-500 outline-none transition-all"></textarea>
-              <button className="w-full bg-blue-600 hover:bg-blue-700 py-4 rounded-xl font-bold text-white shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all">Xabarni yuborish</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <footer className="py-12 border-t border-white/5 bg-slate-950 px-6">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
-          <div className="text-gradient font-bold text-2xl tracking-tighter">PORTFOLIO.</div>
-          <div className="flex gap-8">
-            <a href={data.userInfo.socials.github} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors text-sm">GitHub</a>
-            <a href={data.userInfo.socials.linkedin} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors text-sm">LinkedIn</a>
-            <a href={data.userInfo.socials.telegram} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors text-sm">Telegram</a>
-          </div>
-          <p className="text-slate-500 text-xs">© {new Date().getFullYear()} Barcha huquqlar himoyalangan.</p>
-        </div>
+      {/* Footer */}
+      <footer className="py-20 border-t border-white/5 text-center">
+        <p className="text-slate-500 text-sm">© {new Date().getFullYear()} {data.userInfo.name}. Barcha huquqlar himoyalangan.</p>
       </footer>
 
       <AIChat portfolioData={data} />

@@ -3,43 +3,41 @@ import { GoogleGenAI } from "@google/genai";
 import { PortfolioData } from "../types";
 
 export const getAIResponse = async (userMessage: string, portfolioData: PortfolioData) => {
+  // Use strictly process.env.API_KEY as per guidelines. 
+  // Do not use window fallbacks or external configuration.
   const apiKey = process.env.API_KEY;
   
   if (!apiKey) {
-    console.error("API_KEY topilmadi. Vercel sozlamalarini tekshiring.");
-    return "Tizimda API kaliti sozlanmagan. Iltimos, administratorga murojaat qiling.";
+    console.error("API_KEY topilmadi.");
+    return "Kechirasiz, AI yordamchi hozirda o'chirilgan (API kaliti sozlanmagan).";
   }
 
-  const ai = new GoogleGenAI({ apiKey });
-  const { userInfo, projects, skills } = portfolioData;
+  try {
+    // Initialize GoogleGenAI with the mandatory named parameter { apiKey }
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const { userInfo, skills } = portfolioData;
 
-  const SYSTEM_INSTRUCTION = `
-Siz ${userInfo.name}ning virtual yordamchisiz. Sizning vazifangiz sayt tashrif buyuruvchilariga ${userInfo.name} haqida ma'lumot berish.
-Ma'lumotlar:
-- Ism: ${userInfo.name}
-- Mutaxassislik: ${userInfo.title}
-- Bio: ${userInfo.bio}
-- Ko'nikmalar: ${skills.map(s => s.name).join(", ")}
-- Loyihalar: ${projects.map(p => `${p.title} (${p.description})`).join("; ")}
-- Manzil: ${userInfo.location}
-- Email: ${userInfo.email}
-
-Faqat shu ma'lumotlar asosida javob bering. Siz do'stona, professional va qisqa javob berishingiz kerak.
-Til: O'zbekcha.
+    const systemInstruction = `
+Siz ${userInfo.name}ning virtual yordamchisiz. 
+Ma'lumotlar: Mutaxassislik - ${userInfo.title}, Bio - ${userInfo.bio}, Ko'nikmalar - ${skills.map(s => s.name).join(", ")}.
+Faqat berilgan ma'lumotlar asosida, do'stona va o'zbek tilida javob bering.
 `;
 
-  try {
+    // Always use ai.models.generateContent to query GenAI.
+    // Ensure the content structure follows the recommended parts format.
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: userMessage,
+      contents: { parts: [{ text: userMessage }] },
       config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
+        systemInstruction: systemInstruction,
         temperature: 0.7,
       },
     });
-    return response.text || "Uzr, hozircha javob bera olmayman.";
+
+    // Directly access the .text property of the GenerateContentResponse object.
+    return response.text || "Javob olishda muammo bo'ldi.";
   } catch (error) {
-    console.error("Gemini Error:", error);
-    return "AI bilan bog'lanishda xatolik yuz berdi.";
+    console.error("AI Error:", error);
+    return "AI xizmatida xatolik yuz berdi.";
   }
 };
