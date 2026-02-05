@@ -20,7 +20,7 @@ if (!rootElement) {
     rootElement.innerHTML = `
       <div style="min-height: 100vh; background-color: #020617; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; text-align: center; font-family: sans-serif;">
         <h1 style="color: #ef4444; margin-bottom: 20px;">Dastur yuklanmadi</h1>
-        <p style="color: #94a3b8; max-width: 500px; line-height: 1.6;">Vercel-da API_KEY o'rnatilganligini tekshiring. Brauzer konsolini (F12) ochib xatolikni ko'rishingiz mumkin.</p>
+        <p style="color: #94a3b8; max-width: 500px; line-height: 1.6;">Xatolik tafsilotlari pastda ko'rsatilgan. Brauzer konsolini tekshiring.</p>
         <pre style="background: #1e293b; padding: 15px; border-radius: 8px; margin-top: 20px; font-size: 12px; color: #60a5fa; white-space: pre-wrap; word-break: break-all;">${err instanceof Error ? err.message : 'Noma\'lum xato'}</pre>
         <button onclick="window.location.reload()" style="margin-top: 20px; background: #2563eb; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">Qayta yuklash</button>
       </div>

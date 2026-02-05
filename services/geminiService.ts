@@ -3,18 +3,16 @@ import { GoogleGenAI } from "@google/genai";
 import { PortfolioData } from "../types";
 
 export const getAIResponse = async (userMessage: string, portfolioData: PortfolioData) => {
-  // Use strictly process.env.API_KEY as per guidelines. 
-  // Do not use window fallbacks or external configuration.
-  const apiKey = process.env.API_KEY;
+  // Brauzerda process.env xatoligini xavfsiz tekshirish
+  const apiKey = typeof process !== 'undefined' && process.env ? process.env.API_KEY : undefined;
   
   if (!apiKey) {
-    console.error("API_KEY topilmadi.");
+    console.warn("Gemini API_KEY topilmadi. Iltimos, Vercel Environment Variables-ni tekshiring.");
     return "Kechirasiz, AI yordamchi hozirda o'chirilgan (API kaliti sozlanmagan).";
   }
 
   try {
-    // Initialize GoogleGenAI with the mandatory named parameter { apiKey }
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey });
     const { userInfo, skills } = portfolioData;
 
     const systemInstruction = `
@@ -23,8 +21,6 @@ Ma'lumotlar: Mutaxassislik - ${userInfo.title}, Bio - ${userInfo.bio}, Ko'nikmal
 Faqat berilgan ma'lumotlar asosida, do'stona va o'zbek tilida javob bering.
 `;
 
-    // Always use ai.models.generateContent to query GenAI.
-    // Ensure the content structure follows the recommended parts format.
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: { parts: [{ text: userMessage }] },
@@ -34,7 +30,6 @@ Faqat berilgan ma'lumotlar asosida, do'stona va o'zbek tilida javob bering.
       },
     });
 
-    // Directly access the .text property of the GenerateContentResponse object.
     return response.text || "Javob olishda muammo bo'ldi.";
   } catch (error) {
     console.error("AI Error:", error);
