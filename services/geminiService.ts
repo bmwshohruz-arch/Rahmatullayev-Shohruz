@@ -2,9 +2,15 @@
 import { GoogleGenAI } from "@google/genai";
 import { PortfolioData } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-
 export const getAIResponse = async (userMessage: string, portfolioData: PortfolioData) => {
+  const apiKey = process.env.API_KEY;
+  
+  if (!apiKey) {
+    console.error("API_KEY topilmadi. Vercel sozlamalarini tekshiring.");
+    return "Tizimda API kaliti sozlanmagan. Iltimos, administratorga murojaat qiling.";
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   const { userInfo, projects, skills } = portfolioData;
 
   const SYSTEM_INSTRUCTION = `
@@ -34,6 +40,6 @@ Til: O'zbekcha.
     return response.text || "Uzr, hozircha javob bera olmayman.";
   } catch (error) {
     console.error("Gemini Error:", error);
-    return "Xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring.";
+    return "AI bilan bog'lanishda xatolik yuz berdi.";
   }
 };

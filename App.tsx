@@ -9,6 +9,7 @@ import { supabase } from './services/supabase';
 const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState<string | null>(null);
+  const [criticalError, setCriticalError] = useState<string | null>(null);
   const [data, setData] = useState<PortfolioData>({
     projects: PROJECTS,
     skills: SKILLS,
@@ -17,28 +18,23 @@ const App: React.FC = () => {
 
   const PROFILE_ID = '00000000-0000-0000-0000-000000000001';
 
-  // Fetch data from Supabase on mount
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         setDbError(null);
 
-        // Fetch Profile
-        const { data: profileData, error: pError } = await supabase.from('profiles').select('*').eq('id', PROFILE_ID).maybeSingle();
-        if (pError) console.warn("Profil yuklashda xato (jadval bormi?):", pError.message);
-        
-        // Fetch Projects
-        const { data: projectsData, error: prError } = await supabase.from('projects').select('*').order('id', { ascending: true });
-        if (prError) console.warn("Loyihalar yuklashda xato:", prError.message);
-        
-        // Fetch Skills
-        const { data: skillsData, error: sError } = await supabase.from('skills').select('*').order('id', { ascending: true });
-        if (sError) console.warn("Ko'nikmalar yuklashda xato:", sError.message);
+        // Supabase ulanishini tekshirish
+        if (!supabase) {
+          throw new Error("Supabase mijozini yuklab bo'lmadi.");
+        }
 
-        // Agar jadvallar topilmasa yoki xato bo'lsa, xabar berish (lekin ilova to'xtab qolmaydi)
+        const { data: profileData, error: pError } = await supabase.from('profiles').select('*').eq('id', PROFILE_ID).maybeSingle();
+        const { data: projectsData, error: prError } = await supabase.from('projects').select('*').order('id', { ascending: true });
+        const { data: skillsData, error: sError } = await supabase.from('skills').select('*').order('id', { ascending: true });
+
         if (pError || prError || sError) {
-          setDbError("Supabase jadvallaridan ba'zilari topilmadi. SQL kodni ishga tushirganingizni tekshiring.");
+          setDbError("Supabase jadvallari topilmadi yoki ulanishda xato bor.");
         }
 
         const mappedUserInfo: UserInfo = profileData ? {
@@ -81,7 +77,7 @@ const App: React.FC = () => {
         });
       } catch (error: any) {
         console.error("Kutilmagan xato:", error);
-        setDbError("Ma'lumotlarni yuklashda kutilmagan xato yuz berdi.");
+        setCriticalError(error.message || "Tizimni yuklashda xatolik yuz berdi.");
       } finally {
         setLoading(false);
       }
@@ -92,7 +88,6 @@ const App: React.FC = () => {
 
   const handleSaveData = async (newData: PortfolioData) => {
     try {
-      // 1. Update Profile
       const profileToSave = {
         id: PROFILE_ID,
         name: newData.userInfo.name,
@@ -109,43 +104,40 @@ const App: React.FC = () => {
       const { error: profileError } = await supabase.from('profiles').upsert([profileToSave]);
       if (profileError) throw profileError;
 
-      // 2. Update Skills (Tozalash va qayta kiritish)
       await supabase.from('skills').delete().neq('id', -1);
-      const skillsToSave = newData.skills.map(s => ({
-        name: s.name,
-        level: s.level,
-        icon: s.icon
-      }));
-      if (skillsToSave.length > 0) {
-        await supabase.from('skills').insert(skillsToSave);
+      if (newData.skills.length > 0) {
+        await supabase.from('skills').insert(newData.skills.map(s => ({ name: s.name, level: s.level, icon: s.icon })));
       }
 
-      // 3. Update Projects (Tozalash va qayta kiritish)
       await supabase.from('projects').delete().neq('id', -1);
-      const projectsToSave = newData.projects.map(p => ({
-        title: p.title,
-        description: p.description,
-        image_url: p.image,
-        tags: p.tags,
-        link: p.link
-      }));
-      if (projectsToSave.length > 0) {
-        await supabase.from('projects').insert(projectsToSave);
+      if (newData.projects.length > 0) {
+        await supabase.from('projects').insert(newData.projects.map(p => ({ title: p.title, description: p.description, image_url: p.image, tags: p.tags, link: p.link })));
       }
 
       setData(newData);
-      alert("Ma'lumotlar muvaffaqiyatli saqlandi!");
+      alert("Ma'lumotlar saqlandi!");
     } catch (error: any) {
-      console.error("Saqlashda xato:", error);
-      alert("Xatolik: " + error.message + ". Jadvallar mavjudligini tekshiring.");
+      alert("Saqlashda xato: " + error.message);
     }
   };
+
+  if (criticalError) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+        <div className="bg-red-500/10 border border-red-500/20 p-8 rounded-3xl max-w-md">
+          <h1 className="text-2xl font-bold text-red-500 mb-4">Xatolik Yuz Berdi</h1>
+          <p className="text-slate-400 mb-6">{criticalError}</p>
+          <button onClick={() => window.location.reload()} className="bg-blue-600 px-6 py-2 rounded-xl font-bold">Sahifani yangilash</button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center gap-4">
         <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
-        <p className="text-slate-400 animate-pulse">Ma'lumotlar yuklanmoqda...</p>
+        <p className="text-slate-400 animate-pulse">Yuklanmoqda...</p>
       </div>
     );
   }
@@ -154,13 +146,12 @@ const App: React.FC = () => {
     <div className="min-h-screen animate-in fade-in duration-700">
       {dbError && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-2 rounded-lg text-xs backdrop-blur-md">
-          ⚠️ {dbError}
+          ⚠️ Supabase sozlanmagan. Ilovada standart ma'lumotlar ko'rsatilmoqda.
         </div>
       )}
       
       <AdminPanel data={data} onSave={handleSaveData} />
       
-      {/* Navigation */}
       <nav className="fixed top-0 w-full z-40 glass border-b border-white/5">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="text-xl font-bold text-gradient">PORTFOLIO</div>
@@ -174,24 +165,17 @@ const App: React.FC = () => {
         </div>
       </nav>
 
-      {/* Hero Section */}
       <section id="home" className="pt-32 pb-20 px-6">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center gap-12">
           <div className="flex-1 space-y-6">
             <h2 className="text-blue-500 font-medium tracking-wider uppercase">SALOM, MENING ISMIM</h2>
-            <h1 className="text-5xl md:text-7xl font-bold leading-tight">
-              {data.userInfo.name}
-            </h1>
+            <h1 className="text-5xl md:text-7xl font-bold leading-tight">{data.userInfo.name}</h1>
             <p className="text-xl md:text-2xl text-slate-400 max-w-2xl">
               {data.userInfo.title}. Men <span className="text-white font-medium">mukammal raqamli tajribalar</span> yarataman.
             </p>
             <div className="flex gap-4 pt-4">
-              <a href="#projects" className="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-full font-semibold transition-all text-white shadow-lg shadow-blue-600/20">
-                Loyihalarni ko'rish
-              </a>
-              <a href="#contact" className="border border-white/20 hover:bg-white/5 px-8 py-3 rounded-full font-semibold transition-all">
-                Bog'lanish
-              </a>
+              <a href="#projects" className="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-full font-semibold transition-all text-white shadow-lg shadow-blue-600/20">Loyihalarni ko'rish</a>
+              <a href="#contact" className="border border-white/20 hover:bg-white/5 px-8 py-3 rounded-full font-semibold transition-all">Bog'lanish</a>
             </div>
           </div>
           <div className="relative w-64 h-64 md:w-96 md:h-96">
@@ -205,7 +189,6 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* About Section */}
       <section id="about" className="py-20 bg-slate-900/50">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex flex-col md:flex-row gap-16 items-start">
@@ -231,7 +214,6 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* Skills Section */}
       <section id="skills" className="py-20 px-6">
         <div className="max-w-7xl mx-auto">
           <h2 className="text-3xl font-bold mb-12 text-center">Texnik Ko'nikmalar</h2>
@@ -247,8 +229,8 @@ const App: React.FC = () => {
                 </div>
                 <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
                   <div 
-                    className="h-full bg-gradient-to-r from-blue-500 to-purple-500 w-0 group-hover:w-[var(--progress)] transition-all duration-1000 ease-out"
-                    style={{ '--progress': `${skill.level}%` } as React.CSSProperties}
+                    className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-1000 ease-out"
+                    style={{ width: `${skill.level}%` }}
                   ></div>
                 </div>
               </div>
@@ -257,37 +239,24 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* Projects Section */}
       <section id="projects" className="py-20 bg-slate-900/50 px-6">
         <div className="max-w-7xl mx-auto">
-          <div className="flex justify-between items-end mb-12">
-            <div>
-              <h2 className="text-3xl font-bold mb-2">So'nggi Loyihalar</h2>
-              <p className="text-slate-400">Amalga oshirilgan eng yaxshi ishlarim</p>
-            </div>
-          </div>
+          <h2 className="text-3xl font-bold mb-12">So'nggi Loyihalar</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {data.projects.map((project) => (
-              <div key={project.id || project.title} className="group relative glass rounded-2xl overflow-hidden hover:-translate-y-2 transition-transform duration-300">
+              <div key={project.id || project.title} className="group glass rounded-2xl overflow-hidden hover:-translate-y-2 transition-transform duration-300">
                 <div className="aspect-video overflow-hidden bg-slate-900">
                   <img src={project.image} alt={project.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                 </div>
                 <div className="p-6">
                   <div className="flex gap-2 mb-3 flex-wrap">
                     {project.tags.map(tag => (
-                      <span key={tag} className="text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-400 px-2 py-1 rounded">
-                        {tag}
-                      </span>
+                      <span key={tag} className="text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-400 px-2 py-1 rounded">{tag}</span>
                     ))}
                   </div>
                   <h3 className="text-xl font-bold mb-2 group-hover:text-blue-400 transition-colors">{project.title}</h3>
                   <p className="text-slate-400 text-sm mb-4 line-clamp-2">{project.description}</p>
-                  <a href={project.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm font-semibold text-blue-500 hover:text-blue-400">
-                    Batafsil ko'rish
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                    </svg>
-                  </a>
+                  <a href={project.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm font-semibold text-blue-500">Batafsil</a>
                 </div>
               </div>
             ))}
@@ -295,41 +264,23 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* Contact Section */}
       <section id="contact" className="py-20 px-6">
         <div className="max-w-3xl mx-auto text-center">
-          <h2 className="text-4xl font-bold mb-6">Loyihangiz bormi?</h2>
-          <p className="text-xl text-slate-400 mb-10">
-            Keling, birgalikda ajoyib mahsulot yaratamiz. Men doim yangi imkoniyatlar uchun ochiqman.
-          </p>
-          <div className="glass p-8 rounded-3xl border-blue-500/20">
-            <h3 className="text-2xl font-semibold mb-6">Menga xabar yuboring</h3>
+          <h2 className="text-4xl font-bold mb-10">Bog'lanish</h2>
+          <div className="glass p-8 rounded-3xl">
             <div className="space-y-4 text-left">
-              <input type="text" placeholder="Ismingiz" className="w-full bg-slate-950/50 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500 transition-colors text-white" />
-              <input type="email" placeholder="Email manzilingiz" className="w-full bg-slate-950/50 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500 transition-colors text-white" />
-              <textarea placeholder="Xabaringiz..." rows={4} className="w-full bg-slate-950/50 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500 transition-colors text-white"></textarea>
-              <button className="w-full bg-blue-600 hover:bg-blue-700 py-4 rounded-xl font-bold transition-all transform active:scale-95 text-white shadow-lg shadow-blue-500/20">
-                Yuborish
-              </button>
+              <input type="text" placeholder="Ismingiz" className="w-full bg-slate-950/50 border border-white/10 rounded-xl px-4 py-3 text-white" />
+              <textarea placeholder="Xabaringiz..." rows={4} className="w-full bg-slate-950/50 border border-white/10 rounded-xl px-4 py-3 text-white"></textarea>
+              <button className="w-full bg-blue-600 py-4 rounded-xl font-bold text-white">Yuborish</button>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="py-12 border-t border-white/5 bg-slate-950 px-6">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6 text-center md:text-left">
-          <div className="text-gradient font-bold text-2xl uppercase tracking-tighter">PORTFOLIO.</div>
-          <div className="flex gap-6">
-            <a href={data.userInfo.socials.github} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors">GitHub</a>
-            <a href={data.userInfo.socials.linkedin} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors">LinkedIn</a>
-            <a href={data.userInfo.socials.telegram} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white transition-colors">Telegram</a>
-          </div>
-          <p className="text-slate-500 text-sm">© {new Date().getFullYear()} Barcha huquqlar himoyalangan.</p>
-        </div>
+      <footer className="py-12 border-t border-white/5 bg-slate-950 px-6 text-center">
+        <p className="text-slate-500 text-sm">© {new Date().getFullYear()} {data.userInfo.name}</p>
       </footer>
 
-      {/* AI Assistant Component */}
       <AIChat portfolioData={data} />
     </div>
   );
