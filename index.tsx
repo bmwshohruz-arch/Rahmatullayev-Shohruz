@@ -16,11 +16,14 @@ if (!rootElement) {
       </React.StrictMode>
     );
   } catch (err) {
-    console.error("Render xatoligi:", err);
-    // Fixed: Escaped the single quote in 'Noma\'lum' to avoid breaking the string literal inside the template expression
-    rootElement.innerHTML = `<div style="color: white; padding: 20px; text-align: center;">
-      <h1>Dasturni yuklashda xatolik yuz berdi</h1>
-      <p>${err instanceof Error ? err.message : 'Noma\'lum xato'}</p>
-    </div>`;
+    console.error("Ilovani ishga tushirishda xatolik:", err);
+    rootElement.innerHTML = `
+      <div style="min-height: 100vh; background-color: #020617; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; text-align: center; font-family: sans-serif;">
+        <h1 style="color: #ef4444; margin-bottom: 20px;">Dastur yuklanmadi</h1>
+        <p style="color: #94a3b8; max-width: 500px; line-height: 1.6;">Vercel-da API_KEY o'rnatilganligini tekshiring. Brauzer konsolini (F12) ochib xatolikni ko'rishingiz mumkin.</p>
+        <pre style="background: #1e293b; padding: 15px; border-radius: 8px; margin-top: 20px; font-size: 12px; color: #60a5fa; white-space: pre-wrap; word-break: break-all;">${err instanceof Error ? err.message : 'Noma\'lum xato'}</pre>
+        <button onclick="window.location.reload()" style="margin-top: 20px; background: #2563eb; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">Qayta yuklash</button>
+      </div>
+    `;
   }
 }

@@ -8,7 +8,6 @@ import { supabase } from './services/supabase.ts';
 
 const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
-  const [criticalError, setCriticalError] = useState<string | null>(null);
   const [data, setData] = useState<PortfolioData>({
     projects: PROJECTS,
     skills: SKILLS,
@@ -24,13 +23,14 @@ const App: React.FC = () => {
       try {
         if (isMounted) setLoading(true);
 
-        // Supabase mavjudligini tekshirish
         if (!supabase) {
           console.warn("Supabase ulanishi mavjud emas.");
           if (isMounted) setLoading(false);
           return;
         }
 
+        // Supabase query-lar thenable lekin catch yo'q. 
+        // Shuning uchun await dan foydalanamiz, try/catch uni ushlaydi.
         const [profileRes, projectsRes, skillsRes] = await Promise.all([
           supabase.from('profiles').select('*').eq('id', PROFILE_ID).maybeSingle(),
           supabase.from('projects').select('*').order('id', { ascending: true }),
@@ -39,49 +39,55 @@ const App: React.FC = () => {
 
         if (!isMounted) return;
 
-        // Agar ma'lumotlar bo'lsa, ularni map qilish
-        const profileData = profileRes?.data;
-        const projectsData = projectsRes?.data;
-        const skillsData = skillsRes?.data;
+        // Xatolik bo'lsa konsolga chiqaramiz, lekin default ma'lumotlarni saqlab qolamiz
+        if (profileRes.error) console.error("Profile fetch error:", profileRes.error);
+        if (projectsRes.error) console.error("Projects fetch error:", projectsRes.error);
+        if (skillsRes.error) console.error("Skills fetch error:", skillsRes.error);
 
-        if (profileData || (projectsData && projectsData.length > 0) || (skillsData && skillsData.length > 0)) {
-          setData({
-            userInfo: profileData ? {
-              name: profileData.name,
-              title: profileData.title,
-              bio: profileData.bio,
-              location: profileData.location,
-              email: profileData.email,
-              image: profileData.image_url || USER_INFO.image,
-              socials: {
-                github: profileData.github_url || '',
-                linkedin: profileData.linkedin_url || '',
-                telegram: profileData.telegram_url || ''
-              }
-            } : USER_INFO,
-            projects: projectsData && projectsData.length > 0 
-              ? projectsData.map((p: any) => ({
-                  id: p.id,
-                  title: p.title,
-                  description: p.description,
-                  image: p.image_url,
-                  tags: p.tags || [],
-                  link: p.link
-                }))
-              : PROJECTS,
-            skills: skillsData && skillsData.length > 0
-              ? skillsData.map((s: any) => ({
-                  name: s.name,
-                  level: s.level,
-                  icon: s.icon
-                }))
-              : SKILLS
-          });
-        }
-      } catch (error: any) {
-        if (error.name !== 'AbortError') {
-          console.error("Ma'lumotlarni yuklashda xato:", error);
-        }
+        const profileData = profileRes.data;
+        const projectsData = projectsRes.data;
+        const skillsData = skillsRes.data;
+
+        const mappedUserInfo: UserInfo = profileData ? {
+          name: profileData.name || USER_INFO.name,
+          title: profileData.title || USER_INFO.title,
+          bio: profileData.bio || USER_INFO.bio,
+          location: profileData.location || USER_INFO.location,
+          email: profileData.email || USER_INFO.email,
+          image: profileData.image_url || USER_INFO.image,
+          socials: {
+            github: profileData.github_url || USER_INFO.socials.github,
+            linkedin: profileData.linkedin_url || USER_INFO.socials.linkedin,
+            telegram: profileData.telegram_url || USER_INFO.socials.telegram
+          }
+        } : USER_INFO;
+
+        const mappedProjects: Project[] = Array.isArray(projectsData) && projectsData.length > 0 
+          ? projectsData.map((p: any) => ({
+              id: p.id,
+              title: p.title || 'Nomsiz loyiha',
+              description: p.description || '',
+              image: p.image_url || PROJECTS[0].image,
+              tags: Array.isArray(p.tags) ? p.tags : [],
+              link: p.link || '#'
+            }))
+          : PROJECTS;
+
+        const mappedSkills: Skill[] = Array.isArray(skillsData) && skillsData.length > 0
+          ? skillsData.map((s: any) => ({
+              name: s.name || 'Noma\'lum',
+              level: typeof s.level === 'number' ? s.level : 50,
+              icon: s.icon || '🚀'
+            }))
+          : SKILLS;
+
+        setData({
+          userInfo: mappedUserInfo,
+          projects: mappedProjects,
+          skills: mappedSkills
+        });
+      } catch (error) {
+        console.error("Umumiy yuklash xatoligi:", error);
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -95,7 +101,7 @@ const App: React.FC = () => {
     try {
       if (!supabase) throw new Error("Supabase ulanmagan");
       
-      const profileToSave = {
+      const { error } = await supabase.from('profiles').upsert([{
         id: PROFILE_ID,
         name: newData.userInfo.name,
         title: newData.userInfo.title,
@@ -106,12 +112,14 @@ const App: React.FC = () => {
         github_url: newData.userInfo.socials.github,
         linkedin_url: newData.userInfo.socials.linkedin,
         telegram_url: newData.userInfo.socials.telegram,
-      };
+      }]);
 
-      await supabase.from('profiles').upsert([profileToSave]);
+      if (error) throw error;
+      
       setData(newData);
       alert("Ma'lumotlar saqlandi!");
     } catch (error: any) {
+      console.error("Saqlashda xato:", error);
       alert("Xatolik: " + error.message);
     }
   };
@@ -129,7 +137,6 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-slate-950 text-slate-200 selection:bg-blue-500/30">
       <AdminPanel data={data} onSave={handleSaveData} />
       
-      {/* Navbar */}
       <nav className="fixed top-0 w-full z-40 glass border-b border-white/5 h-16">
         <div className="max-w-7xl mx-auto px-6 h-full flex items-center justify-between">
           <div className="text-xl font-bold text-gradient tracking-tighter">PORTFOLIO.</div>
@@ -142,7 +149,6 @@ const App: React.FC = () => {
         </div>
       </nav>
 
-      {/* Hero */}
       <section id="home" className="pt-32 pb-20 px-6">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center gap-12">
           <div className="flex-1 space-y-6">
@@ -161,14 +167,13 @@ const App: React.FC = () => {
             <img 
               src={data.userInfo.image} 
               alt="Profile" 
-              className="relative z-10 w-64 h-64 md:w-80 md:h-80 object-cover rounded-3xl border border-white/10 shadow-2xl"
-              onError={(e) => { (e.target as any).src = 'https://picsum.photos/400/400'; }}
+              className="relative z-10 w-64 h-64 md:w-80 md:h-80 object-cover rounded-3xl border border-white/10 shadow-2xl bg-slate-900"
+              onError={(e) => { (e.target as any).src = 'https://picsum.photos/400/400?random=1'; }}
             />
           </div>
         </div>
       </section>
 
-      {/* Skills */}
       <section id="skills" className="py-20 px-6 bg-slate-900/20">
         <div className="max-w-7xl mx-auto">
           <h2 className="text-3xl font-bold mb-12 text-center">Texnik Mahorat</h2>
@@ -189,13 +194,12 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* Projects */}
       <section id="projects" className="py-20 px-6">
         <div className="max-w-7xl mx-auto">
           <h2 className="text-3xl font-bold mb-12">Tanlangan Loyihalar</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {data.projects.map((project, i) => (
-              <div key={i} className="glass rounded-3xl overflow-hidden group">
+              <div key={project.id || i} className="glass rounded-3xl overflow-hidden group">
                 <div className="aspect-video bg-slate-900 overflow-hidden">
                   <img src={project.image} alt={project.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                 </div>
@@ -215,7 +219,6 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* Footer */}
       <footer className="py-20 border-t border-white/5 text-center">
         <p className="text-slate-500 text-sm">© {new Date().getFullYear()} {data.userInfo.name}. Barcha huquqlar himoyalangan.</p>
       </footer>
