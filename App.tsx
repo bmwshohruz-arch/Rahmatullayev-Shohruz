@@ -8,6 +8,7 @@ import { supabase } from './services/supabase';
 
 const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
+  const [dbError, setDbError] = useState<string | null>(null);
   const [data, setData] = useState<PortfolioData>({
     projects: PROJECTS,
     skills: SKILLS,
@@ -21,15 +22,24 @@ const App: React.FC = () => {
     const fetchData = async () => {
       try {
         setLoading(true);
+        setDbError(null);
 
         // Fetch Profile
-        const { data: profileData } = await supabase.from('profiles').select('*').eq('id', PROFILE_ID).maybeSingle();
+        const { data: profileData, error: pError } = await supabase.from('profiles').select('*').eq('id', PROFILE_ID).maybeSingle();
+        if (pError) console.warn("Profil yuklashda xato (jadval bormi?):", pError.message);
         
         // Fetch Projects
-        const { data: projectsData } = await supabase.from('projects').select('*').order('id', { ascending: true });
+        const { data: projectsData, error: prError } = await supabase.from('projects').select('*').order('id', { ascending: true });
+        if (prError) console.warn("Loyihalar yuklashda xato:", prError.message);
         
         // Fetch Skills
-        const { data: skillsData } = await supabase.from('skills').select('*').order('id', { ascending: true });
+        const { data: skillsData, error: sError } = await supabase.from('skills').select('*').order('id', { ascending: true });
+        if (sError) console.warn("Ko'nikmalar yuklashda xato:", sError.message);
+
+        // Agar jadvallar topilmasa yoki xato bo'lsa, xabar berish (lekin ilova to'xtab qolmaydi)
+        if (pError || prError || sError) {
+          setDbError("Supabase jadvallaridan ba'zilari topilmadi. SQL kodni ishga tushirganingizni tekshiring.");
+        }
 
         const mappedUserInfo: UserInfo = profileData ? {
           name: profileData.name,
@@ -69,8 +79,9 @@ const App: React.FC = () => {
           projects: mappedProjects,
           skills: mappedSkills
         });
-      } catch (error) {
-        console.error("Supabase yuklashda xato:", error);
+      } catch (error: any) {
+        console.error("Kutilmagan xato:", error);
+        setDbError("Ma'lumotlarni yuklashda kutilmagan xato yuz berdi.");
       } finally {
         setLoading(false);
       }
@@ -98,17 +109,19 @@ const App: React.FC = () => {
       const { error: profileError } = await supabase.from('profiles').upsert([profileToSave]);
       if (profileError) throw profileError;
 
-      // 2. Update Skills
-      await supabase.from('skills').delete().neq('name', '___NON_EXISTENT___');
+      // 2. Update Skills (Tozalash va qayta kiritish)
+      await supabase.from('skills').delete().neq('id', -1);
       const skillsToSave = newData.skills.map(s => ({
         name: s.name,
         level: s.level,
         icon: s.icon
       }));
-      await supabase.from('skills').insert(skillsToSave);
+      if (skillsToSave.length > 0) {
+        await supabase.from('skills').insert(skillsToSave);
+      }
 
-      // 3. Update Projects
-      await supabase.from('projects').delete().neq('title', '___NON_EXISTENT___');
+      // 3. Update Projects (Tozalash va qayta kiritish)
+      await supabase.from('projects').delete().neq('id', -1);
       const projectsToSave = newData.projects.map(p => ({
         title: p.title,
         description: p.description,
@@ -116,26 +129,35 @@ const App: React.FC = () => {
         tags: p.tags,
         link: p.link
       }));
-      await supabase.from('projects').insert(projectsToSave);
+      if (projectsToSave.length > 0) {
+        await supabase.from('projects').insert(projectsToSave);
+      }
 
       setData(newData);
       alert("Ma'lumotlar muvaffaqiyatli saqlandi!");
     } catch (error: any) {
       console.error("Saqlashda xato:", error);
-      alert("Xatolik: " + error.message);
+      alert("Xatolik: " + error.message + ". Jadvallar mavjudligini tekshiring.");
     }
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center gap-4">
         <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+        <p className="text-slate-400 animate-pulse">Ma'lumotlar yuklanmoqda...</p>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen animate-in fade-in duration-700">
+      {dbError && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-2 rounded-lg text-xs backdrop-blur-md">
+          ⚠️ {dbError}
+        </div>
+      )}
+      
       <AdminPanel data={data} onSave={handleSaveData} />
       
       {/* Navigation */}
@@ -164,7 +186,7 @@ const App: React.FC = () => {
               {data.userInfo.title}. Men <span className="text-white font-medium">mukammal raqamli tajribalar</span> yarataman.
             </p>
             <div className="flex gap-4 pt-4">
-              <a href="#projects" className="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-full font-semibold transition-all text-white">
+              <a href="#projects" className="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-full font-semibold transition-all text-white shadow-lg shadow-blue-600/20">
                 Loyihalarni ko'rish
               </a>
               <a href="#contact" className="border border-white/20 hover:bg-white/5 px-8 py-3 rounded-full font-semibold transition-all">
@@ -177,7 +199,7 @@ const App: React.FC = () => {
             <img 
               src={data.userInfo.image} 
               alt="Profile" 
-              className="relative z-10 w-full h-full object-cover rounded-3xl border-2 border-white/10 shadow-2xl bg-slate-900"
+              className="relative z-10 w-full h-full object-cover rounded-3xl border-2 border-white/10 shadow-2xl bg-slate-900 transition-transform hover:scale-[1.02]"
             />
           </div>
         </div>
